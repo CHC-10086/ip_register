@@ -9,15 +9,14 @@ class ConflictDetector:
         """检测所有冲突"""
         conflicts = []
         conflicts.extend(self._detect_ip_conflicts())
-        conflicts.extend(self._detect_mac_conflicts())
         return conflicts
 
     def _detect_ip_conflicts(self):
-        """检测同一 IP 对应多个 MAC 的情况"""
+        """检测同一 IP 对应多个设备的情况（通过 IP 历史表）"""
         db = get_db()
         rows = db.execute('''
             SELECT ip_address, COUNT(DISTINCT mac_address) as mac_count
-            FROM devices
+            FROM device_ips
             WHERE mac_address IS NOT NULL AND mac_address != ''
             GROUP BY ip_address
             HAVING mac_count > 1
@@ -26,75 +25,49 @@ class ConflictDetector:
         conflicts = []
         for row in rows:
             ip = row['ip_address']
-            devices = DeviceRepository.get_by_ip(ip)
-            if devices:
-                mac_list = [d.mac_address for d in devices if d.mac_address]
+            # 获取使用该 IP 的所有设备
+            mac_rows = db.execute('''
+                SELECT DISTINCT mac_address FROM device_ips WHERE ip_address = ?
+            ''', (ip,)).fetchall()
+
+            mac_list = []
+            device_ids = []
+            for mac_row in mac_rows:
+                mac = mac_row['mac_address']
+                device = DeviceRepository.get_by_mac(mac)
+                if device:
+                    mac_list.append(mac)
+                    device_ids.append(device.id)
+
+            if mac_list:
                 conflicts.append({
                     'type': 'ip_conflict',
                     'ip': ip,
-                    'message': f'IP {ip} 对应多个 MAC: {", ".join(mac_list)}',
-                    'devices': [d.id for d in devices],
+                    'message': f'IP {ip} 被多个设备使用: {", ".join(mac_list)}',
+                    'devices': device_ids,
                 })
                 # 标记为冲突状态
-                for d in devices:
-                    DeviceRepository.update(d.id, status='冲突')
-
-        return conflicts
-
-    def _detect_mac_conflicts(self):
-        """检测同一 MAC 对应多个 IP 的情况"""
-        db = get_db()
-        rows = db.execute('''
-            SELECT mac_address, COUNT(DISTINCT ip_address) as ip_count
-            FROM devices
-            WHERE mac_address IS NOT NULL AND mac_address != ''
-            GROUP BY mac_address
-            HAVING ip_count > 1
-        ''').fetchall()
-
-        conflicts = []
-        for row in rows:
-            mac = row['mac_address']
-            devices = DeviceRepository.get_by_mac(mac)
-            if len(devices) > 1:
-                ip_list = [d.ip_address for d in devices]
-                conflicts.append({
-                    'type': 'mac_conflict',
-                    'mac': mac,
-                    'message': f'MAC {mac} 对应多个 IP: {", ".join(ip_list)}',
-                    'devices': [d.id for d in devices],
-                })
-                # 标记为冲突状态
-                for d in devices:
-                    DeviceRepository.update(d.id, status='冲突')
+                for device_id in device_ids:
+                    DeviceRepository.update(device_id, status='冲突')
 
         return conflicts
 
     def get_conflict_summary(self):
         """获取冲突摘要"""
         db = get_db()
+
+        # IP 冲突：同一 IP 被多个 MAC 使用
         ip_conflicts = db.execute('''
             SELECT COUNT(*) FROM (
                 SELECT ip_address
-                FROM devices
-                WHERE mac_address IS NOT NULL AND mac_address != ''
+                FROM device_ips
                 GROUP BY ip_address
                 HAVING COUNT(DISTINCT mac_address) > 1
             )
         ''').fetchone()[0]
 
-        mac_conflicts = db.execute('''
-            SELECT COUNT(*) FROM (
-                SELECT mac_address
-                FROM devices
-                WHERE mac_address IS NOT NULL AND mac_address != ''
-                GROUP BY mac_address
-                HAVING COUNT(DISTINCT ip_address) > 1
-            )
-        ''').fetchone()[0]
-
         return {
             'ip_conflicts': ip_conflicts,
-            'mac_conflicts': mac_conflicts,
-            'total': ip_conflicts + mac_conflicts,
+            'mac_conflicts': 0,  # MAC 冲突在新架构中不存在（MAC 是唯一主键）
+            'total': ip_conflicts,
         }
