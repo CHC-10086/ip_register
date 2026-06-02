@@ -19,13 +19,11 @@ def is_already_running():
         try:
             with open(LOCK_FILE, 'r') as f:
                 pid = int(f.read().strip())
-            # Check if process is still alive
             import psutil
             if psutil.pid_exists(pid):
                 return True
         except (ValueError, FileNotFoundError, ImportError):
             pass
-        # Lock file exists but process is dead, remove it
         try:
             os.remove(LOCK_FILE)
         except:
@@ -57,40 +55,50 @@ def create_icon_image():
     height = 64
     image = Image.new('RGBA', (width, height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
-
-    # Draw a blue circle with "IP" text
     draw.ellipse([4, 4, width-4, height-4], fill='#0d6efd', outline='white', width=2)
-
-    # Draw "IP" text
     bbox = draw.textbbox((0, 0), "IP", anchor="lt")
     text_width = bbox[2] - bbox[0]
     text_height = bbox[3] - bbox[1]
     x = (width - text_width) // 2
     y = (height - text_height) // 2 - 4
     draw.text((x, y), "IP", fill='white')
-
     return image
 
 
 def start_flask():
-    """Start Flask app in background thread"""
+    """Start Flask app on port 8088"""
     from app import create_app
     app = create_app()
     app.run(host='0.0.0.0', port=8088, debug=False, use_reloader=False)
 
 
 def start_redirect():
-    """Start redirect server on port 80"""
+    """Simple HTTP redirect on port 80"""
+    import socket
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     try:
-        from redirect import app as redirect_app
-        redirect_app.run(host='0.0.0.0', port=80, debug=False)
-    except Exception:
-        pass  # Port 80 may be in use, ignore
+        server.bind(('0.0.0.0', 80))
+        server.listen(5)
+        while True:
+            conn, addr = server.accept()
+            try:
+                conn.recv(1024)
+                response = 'HTTP/1.1 302 Found\r\nLocation: http://ip.local:8088/\r\nConnection: close\r\n\r\n'
+                conn.sendall(response.encode())
+            except:
+                pass
+            finally:
+                conn.close()
+    except Exception as e:
+        print(f"Port 80 redirect failed: {e}")
+    finally:
+        server.close()
 
 
 def open_dashboard(icon=None, item=None):
     """Open dashboard in browser"""
-    webbrowser.open('http://127.0.0.1:8088')
+    webbrowser.open('http://ip.local:8088')
 
 
 def quit_app(icon=None, item=None):
@@ -105,35 +113,30 @@ def setup_icon():
     """Setup system tray icon"""
     global icon, flask_thread
 
-    # Check if already running
     if is_already_running():
-        # Show message and exit
         ctypes.windll.user32.MessageBoxW(
             0,
             "IP Register is already running.\nCheck the system tray icon.",
             "IP Register",
-            0x40  # MB_ICONINFORMATION
+            0x40
         )
         sys.exit(0)
 
-    # Write lock file
     write_lock()
 
-    # Start Flask in background
+    # Start Flask on 8088
     flask_thread = threading.Thread(target=start_flask, daemon=True)
     flask_thread.start()
 
-    # Start redirect server on port 80
+    # Start redirect on 80 (may fail if port is in use)
     redirect_thread = threading.Thread(target=start_redirect, daemon=True)
     redirect_thread.start()
 
-    # Create menu
     menu = pystray.Menu(
         MenuItem('Open Dashboard', open_dashboard, default=True),
         MenuItem('Quit', quit_app),
     )
 
-    # Create icon
     icon = Icon(
         'IPRegister',
         create_icon_image(),
@@ -141,7 +144,6 @@ def setup_icon():
         menu
     )
 
-    # Run icon
     icon.run()
 
 
