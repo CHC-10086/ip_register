@@ -68,9 +68,9 @@ if __name__ == '__main__':
     print("=" * 50)
     print("局域网 IP 登记系统")
     print("=" * 50)
-    print(f"访问地址: http://127.0.0.1:8088")
+    print(f"访问地址: http://ip")
     print(f"扫描网段: {app.config['SCAN_SUBNET']}")
     print("注意: ARP 扫描需要管理员权限运行")
     print("=" * 50)
 
-    app.run(host='0.0.0.0', port=8088, debug=True)
+    app.run(host='0.0.0.0', port=80, debug=True)
