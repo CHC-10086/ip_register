@@ -79,6 +79,15 @@ def start_flask():
     app.run(host='0.0.0.0', port=8088, debug=False, use_reloader=False)
 
 
+def start_redirect():
+    """Start redirect server on port 80"""
+    try:
+        from redirect import app as redirect_app
+        redirect_app.run(host='0.0.0.0', port=80, debug=False)
+    except Exception:
+        pass  # Port 80 may be in use, ignore
+
+
 def open_dashboard(icon=None, item=None):
     """Open dashboard in browser"""
     webbrowser.open('http://127.0.0.1:8088')
@@ -113,6 +122,10 @@ def setup_icon():
     # Start Flask in background
     flask_thread = threading.Thread(target=start_flask, daemon=True)
     flask_thread.start()
+
+    # Start redirect server on port 80
+    redirect_thread = threading.Thread(target=start_redirect, daemon=True)
+    redirect_thread.start()
 
     # Create menu
     menu = pystray.Menu(
