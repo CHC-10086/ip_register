@@ -217,6 +217,15 @@ def device_add_from_scan():
     # 检查是否已存在（根据 MAC）
     existing = DeviceRepository.get_by_mac(mac)
     if existing:
+        # 更新扫描到的新端口
+        if ports:
+            old_ports = set(existing.port.split(',')) if existing.port else set()
+            new_ports = set(ports.split(','))
+            merged = ','.join(sorted(old_ports | new_ports))
+            DeviceRepository.update(existing.id, port=merged)
+        if ip:
+            DeviceRepository.update(existing.id, current_ip=ip)
+            DeviceRepository.add_ip_history(mac, ip)
         flash(f'设备 {mac} 已存在，进入编辑模式', 'info')
         return redirect(url_for('views.device_edit', device_id=existing.id))
 
