@@ -12,6 +12,37 @@
     </div>
 </div>
 
+<!-- 本机信息 -->
+<div class="row mb-4">
+    <div class="col-md-6">
+        <div class="card bg-dark text-white">
+            <div class="card-body d-flex align-items-center">
+                <i class="bi bi-pc-display display-4 me-3"></i>
+                <div>
+                    <div class="small text-muted">本机 IP 地址</div>
+                    <h4 class="mb-0">{{ local_ip }}</h4>
+                </div>
+                <div class="ms-auto">
+                    <button class="btn btn-sm btn-outline-light" onclick="copyIP()" title="复制 IP">
+                        <i class="bi bi-clipboard"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card bg-secondary text-white">
+            <div class="card-body d-flex align-items-center">
+                <i class="bi bi-diagram-3 display-4 me-3"></i>
+                <div>
+                    <div class="small text-muted">扫描网段</div>
+                    <h4 class="mb-0">{{ config.SCAN_SUBNET }}</h4>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- 统计卡片 -->
 <div class="row mb-4">
     <div class="col-md-2">
@@ -273,6 +304,13 @@
 
 {% block extra_js %}
 <script>
+function copyIP() {
+    var ip = '{{ local_ip }}';
+    navigator.clipboard.writeText(ip).then(function() {
+        alert('已复制: ' + ip);
+    });
+}
+
 function toggleAutoStart(enabled) {
     fetch("{{ url_for('api.toggle_auto_start') }}", {
         method: 'POST',

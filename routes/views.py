@@ -37,6 +37,9 @@ def index():
     # 检查自启状态
     auto_start_enabled = _check_auto_start()
 
+    # 获取本机 IP
+    local_ip = _get_local_ip()
+
     return render_template('index.html',
                            stats=stats,
                            conflicts=conflict_summary,
@@ -44,7 +47,8 @@ def index():
                            scan_logs=scan_logs,
                            recent_alerts=alerts,
                            registered_devices=registered_devices[:10],
-                           auto_start_enabled=auto_start_enabled)
+                           auto_start_enabled=auto_start_enabled,
+                           local_ip=local_ip)
 
 
 def _check_auto_start():
@@ -64,6 +68,19 @@ def _check_auto_start():
         return True
     except (WindowsError, FileNotFoundError):
         return False
+
+
+def _get_local_ip():
+    """获取本机局域网 IP"""
+    import socket
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(('8.8.8.8', 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return '127.0.0.1'
 
 
 @views_bp.route('/devices')
