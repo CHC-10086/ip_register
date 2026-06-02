@@ -134,19 +134,20 @@ def device_edit(device_id):
 def device_add():
     """手动添加设备"""
     if request.method == 'POST':
-        ip = request.form.get('ip_address', '').strip()
-        mac = request.form.get('mac_address', '').strip()
+        mac = request.form.get('mac_address', '').strip().upper()
+        ip = request.form.get('current_ip', '').strip()
 
-        if not ip:
-            flash('IP 地址不能为空', 'error')
+        if not mac:
+            flash('MAC 地址不能为空', 'error')
             return render_template('device_edit.html', device=None, mode='add')
 
-        existing = DeviceRepository.get_by_ip(ip)
+        # 检查 MAC 是否已存在
+        existing = DeviceRepository.get_by_mac(mac)
         if existing:
-            flash('该 IP 地址已存在', 'error')
+            flash('该 MAC 地址已存在', 'error')
             return render_template('device_edit.html', device=None, mode='add')
 
-        device_id = DeviceRepository.create(ip, mac if mac else None, status='已登记')
+        device_id = DeviceRepository.create(mac, ip if ip else None, status='已登记')
 
         # 更新其他信息
         updates = {
@@ -185,24 +186,28 @@ def device_add_from_scan():
     # 支持 GET 和 POST 两种方式获取参数
     if request.method == 'POST':
         ip = request.form.get('ip', '').strip()
-        mac = request.form.get('mac', '').strip()
+        mac = request.form.get('mac', '').strip().upper()
         ports = request.form.get('ports', '').strip()
     else:
         ip = request.args.get('ip', '').strip()
-        mac = request.args.get('mac', '').strip()
+        mac = request.args.get('mac', '').strip().upper()
         ports = request.args.get('ports', '').strip()
 
-    # 检查是否已存在
-    existing = DeviceRepository.get_by_ip(ip)
+    if not mac:
+        flash('MAC 地址不能为空', 'error')
+        return redirect(url_for('views.scan_page'))
+
+    # 检查是否已存在（根据 MAC）
+    existing = DeviceRepository.get_by_mac(mac)
     if existing:
-        flash(f'设备 {ip} 已存在，进入编辑模式', 'info')
+        flash(f'设备 {mac} 已存在，进入编辑模式', 'info')
         return redirect(url_for('views.device_edit', device_id=existing.id))
 
     # 创建一个临时对象用于表单预填
     class ScanDevice:
         def __init__(self, ip, mac, ports):
             self.id = None
-            self.ip_address = ip
+            self.current_ip = ip
             self.mac_address = mac
             self.port = ports
             self.device_name = ''
@@ -212,6 +217,8 @@ def device_add_from_scan():
             self.os_info = ''
             self.status = '未登记'
             self.remark = ''
+            self.ip_history = []
+            self.vendor = ''
 
     device = ScanDevice(ip, mac, ports)
     return render_template('device_edit.html', device=device, mode='add')
@@ -228,23 +235,33 @@ def scan_register_all():
 
     registered = 0
     for device in devices:
-        ip = device.get('ip', '')
-        if not ip:
+        mac = device.get('mac', '').strip().upper()
+        if not mac:
             continue
-        existing = DeviceRepository.get_by_ip(ip)
+
+        ip = device.get('ip', '')
+        ports_str = device.get('ports_str', '')
+
+        # 根据 MAC 查找设备
+        existing = DeviceRepository.get_by_mac(mac)
         if existing:
-            # 更新端口信息
-            ports_str = device.get('ports_str', '')
+            # 更新端口和 IP 信息
+            updates = {}
             if ports_str:
                 old_ports = set(existing.port.split(',')) if existing.port else set()
                 new_ports = set(ports_str.split(','))
                 merged = sorted(old_ports | new_ports, key=lambda x: int(x) if x.isdigit() else 0)
-                DeviceRepository.update(existing.id, port=','.join(merged))
+                updates['port'] = ','.join(merged)
+            if ip:
+                updates['current_ip'] = ip
+                DeviceRepository.add_ip_history(mac, ip)
+            if updates:
+                DeviceRepository.update(existing.id, **updates)
             continue
 
-        mac = device.get('mac', '')
-        ports_str = device.get('ports_str', '')
-        device_id = DeviceRepository.create(ip, mac if mac else None, status='未登记')
+        # 新设备
+        vendor = device.get('vendor', '')
+        device_id = DeviceRepository.create(mac, ip if ip else None, vendor, status='未登记')
         if ports_str:
             DeviceRepository.update(device_id, port=ports_str)
         registered += 1
@@ -393,12 +410,12 @@ def export_csv():
 
     si = StringIO()
     writer = csv.writer(si)
-    writer.writerow(['ID', 'IP地址', '端口', 'MAC地址', '设备名称', '使用者', '部门', '用途', '操作系统', '状态', '首次发现', '最后发现', '备注'])
+    writer.writerow(['ID', 'MAC地址', '厂商', '当前IP', '端口', '设备名称', '使用者', '部门', '用途', '操作系统', '状态', '首次发现', '最后发现', '备注'])
 
     for d in devices:
         writer.writerow([
-            d.id, d.ip_address, d.port or '', d.mac_address or '',
-            d.device_name or '', d.user_name or '',
+            d.id, d.mac_address or '', d.vendor or '', d.current_ip or '',
+            d.port or '', d.device_name or '', d.user_name or '',
             d.department or '', d.purpose or '',
             d.os_info or '', d.status,
             d.first_seen, d.last_seen, d.remark or ''

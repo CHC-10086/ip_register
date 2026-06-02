@@ -445,7 +445,7 @@ class ARPScanner:
         return {'success': True, 'message': '扫描已启动'}
 
     def _process_scan_results(self, devices):
-        """处理扫描结果，更新数据库"""
+        """处理扫描结果，更新数据库（MAC 为主标识）"""
         new_count = 0
         alert_service = NotificationService(self.app)
         conflict_detector = ConflictDetector()
@@ -455,13 +455,18 @@ class ARPScanner:
             mac = device.get('mac', '')
             ports_str = device.get('ports_str', '')
             os_info = device.get('os_info', '')
+            vendor = device.get('vendor', '')
 
-            existing = DeviceRepository.get_by_ip(ip)
+            if not mac:
+                # 没有 MAC 地址的设备跳过（Ping 扫描模式）
+                continue
+
+            # 根据 MAC 查找设备
+            existing = DeviceRepository.get_by_mac(mac)
 
             if existing:
-                updates = {}
-                if mac and existing.mac_address != mac:
-                    updates['mac_address'] = mac
+                # 设备已存在，更新信息
+                updates = {'current_ip': ip}
                 if ports_str:
                     old_ports = set(existing.port.split(',')) if existing.port else set()
                     new_ports = set(ports_str.split(','))
@@ -469,15 +474,18 @@ class ARPScanner:
                     updates['port'] = ','.join(merged)
                 if os_info and (not existing.os_info or existing.os_info == 'Unknown'):
                     updates['os_info'] = os_info
-                if updates:
-                    DeviceRepository.update(existing.id, **updates)
-                DeviceRepository.update_last_seen(existing.id)
+                if vendor and not existing.vendor:
+                    updates['vendor'] = vendor
+                DeviceRepository.update(existing.id, **updates)
+                DeviceRepository.update_last_seen(existing.id, ip)
+                DeviceRepository.add_ip_history(mac, ip)
 
                 if existing.status == '已下线':
                     new_status = '已登记' if existing.device_name else '未登记'
                     DeviceRepository.update(existing.id, status=new_status)
             else:
-                device_id = DeviceRepository.create(ip, mac if mac else None, status='未登记')
+                # 新设备
+                device_id = DeviceRepository.create(mac, ip, vendor, status='未登记')
                 update_data = {}
                 if ports_str:
                     update_data['port'] = ports_str
@@ -486,8 +494,6 @@ class ARPScanner:
                 if update_data:
                     DeviceRepository.update(device_id, **update_data)
                 new_count += 1
-
-                vendor = device.get('vendor', '')
                 alert_service.notify_new_device(ip, mac, vendor)
 
         conflicts = conflict_detector.detect()

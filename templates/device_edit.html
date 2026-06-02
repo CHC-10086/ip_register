@@ -30,12 +30,31 @@
                 {% if mode == 'view' %}
                 <!-- 详情模式 -->
                 <div class="row mb-3">
-                    <div class="col-md-3 fw-bold">IP 地址</div>
-                    <div class="col-md-9"><code>{{ device.ip_address }}</code></div>
+                    <div class="col-md-3 fw-bold">MAC 地址</div>
+                    <div class="col-md-9"><code>{{ device.mac_address }}</code></div>
                 </div>
                 <div class="row mb-3">
-                    <div class="col-md-3 fw-bold">MAC 地址</div>
-                    <div class="col-md-9">{{ device.mac_address or '-' }}</div>
+                    <div class="col-md-3 fw-bold">厂商</div>
+                    <div class="col-md-9">{{ device.vendor or '-' }}</div>
+                </div>
+                <div class="row mb-3">
+                    <div class="col-md-3 fw-bold">当前 IP</div>
+                    <div class="col-md-9"><code>{{ device.current_ip or '-' }}</code></div>
+                </div>
+                <div class="row mb-3">
+                    <div class="col-md-3 fw-bold">IP 历史</div>
+                    <div class="col-md-9">
+                        {% if device.ip_history %}
+                            {% for ip in device.ip_history %}
+                            <div class="mb-1">
+                                <span class="badge bg-secondary">{{ ip.ip_address }}</span>
+                                <small class="text-muted">首次: {{ ip.first_seen|datetime }} | 最后: {{ ip.last_seen|datetime }}</small>
+                            </div>
+                            {% endfor %}
+                        {% else %}
+                            -
+                        {% endif %}
+                    </div>
                 </div>
                 <div class="row mb-3">
                     <div class="col-md-3 fw-bold">开放端口</div>
@@ -46,14 +65,20 @@
                                     {% set port_info = p.strip().replace(')', '').split('(') %}
                                     {% set port_num = port_info[0] %}
                                     {% set port_svc = port_info[1] if port_info|length > 1 else '' %}
-                                    <a href="http://{{ device.ip_address }}:{{ port_num }}" target="_blank"
-                                       class="btn btn-sm btn-outline-primary" title="点击访问 {{ device.ip_address }}:{{ port_num }}">
+                                    {% if device.current_ip %}
+                                    <a href="http://{{ device.current_ip }}:{{ port_num }}" target="_blank"
+                                       class="btn btn-sm btn-outline-primary" title="点击访问 {{ device.current_ip }}:{{ port_num }}">
                                         <i class="bi bi-box-arrow-up-right"></i>
                                         {{ port_num }}
                                         {% if port_svc %}
                                             <span class="badge bg-secondary ms-1">{{ port_svc }}</span>
                                         {% endif %}
                                     </a>
+                                    {% else %}
+                                    <span class="btn btn-sm btn-outline-secondary">
+                                        {{ port_num }}{% if port_svc %} <span class="badge bg-secondary ms-1">{{ port_svc }}</span>{% endif %}
+                                    </span>
+                                    {% endif %}
                                 {% endfor %}
                             </div>
                         {% else %}
@@ -122,20 +147,21 @@
                 <form method="POST" id="deviceForm" action="{{ url_for('views.device_add') if mode == 'add' else url_for('views.device_edit', device_id=device.id) }}">
                     <div class="row">
                         <div class="col-md-8 mb-3">
-                            <label for="ip_address" class="form-label">IP 地址 {% if mode == 'add' %}<span class="text-danger">*</span>{% endif %}</label>
+                            <label for="mac_address" class="form-label">MAC 地址 {% if mode == 'add' %}<span class="text-danger">*</span>{% endif %}</label>
                             {% if mode == 'add' %}
-                            <input type="text" class="form-control" id="ip_address" name="ip_address" required
-                                   placeholder="例如: 192.168.1.100"
-                                   value="{{ device.ip_address if device else '' }}">
+                            <input type="text" class="form-control" id="mac_address" name="mac_address" required
+                                   placeholder="例如: AA:BB:CC:DD:EE:FF"
+                                   value="{{ device.mac_address if device else '' }}">
                             {% else %}
-                            <input type="text" class="form-control" value="{{ device.ip_address }}" disabled>
+                            <input type="text" class="form-control" value="{{ device.mac_address }}" disabled>
+                            <input type="hidden" name="mac_address" value="{{ device.mac_address }}">
                             {% endif %}
                         </div>
                         <div class="col-md-4 mb-3">
-                            <label for="mac_address" class="form-label">MAC 地址</label>
-                            <input type="text" class="form-control" id="mac_address" name="mac_address"
-                                   value="{{ device.mac_address if device else '' }}"
-                                   placeholder="AA:BB:CC:DD:EE:FF">
+                            <label for="current_ip" class="form-label">当前 IP</label>
+                            <input type="text" class="form-control" id="current_ip" name="current_ip"
+                                   value="{{ device.current_ip if device else '' }}"
+                                   placeholder="例如: 192.168.1.100">
                         </div>
                     </div>
 
@@ -149,17 +175,6 @@
                         </label>
                         <div id="portList" class="border rounded p-2" style="min-height: 60px; background: #f8f9fa;">
                             <!-- 端口行会在这里动态添加 -->
-                            {% if device and device.port %}
-                                {% for p in device.port.split(',') %}
-                                <div class="port-row d-flex align-items-center mb-2">
-                                    <input type="number" class="form-control form-control-sm me-2" name="port_num" value="{{ p.strip() }}" placeholder="端口号" style="width: 100px;" min="1" max="65535">
-                                    <input type="text" class="form-control form-control-sm me-2" name="port_service" value="" placeholder="服务说明 (如: Web/MySQL/SSH)" style="flex: 1;">
-                                    <button type="button" class="btn btn-sm btn-outline-danger" onclick="removePortRow(this)">
-                                        <i class="bi bi-x"></i>
-                                    </button>
-                                </div>
-                                {% endfor %}
-                            {% endif %}
                         </div>
                         <div class="form-text">填写端口号和服务说明，例如: 80 (Web), 3306 (MySQL), 22 (SSH)</div>
                     </div>
@@ -333,7 +348,6 @@ document.getElementById('deviceForm').addEventListener('submit', function(e) {
     ports.forEach(function(p) {
         p = p.trim();
         if (p) {
-            // 解析格式: "80" 或 "80(HTTP)" 或 "80(HTTP"
             var match = p.match(/^(\d+)\(?([^)]*)\)?$/);
             if (match) {
                 var portNum = match[1];

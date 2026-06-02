@@ -17,7 +17,7 @@
             <div class="col-md-6">
                 <div class="input-group">
                     <span class="input-group-text"><i class="bi bi-search"></i></span>
-                    <input type="text" class="form-control" name="keyword" value="{{ keyword }}" placeholder="搜索 IP、MAC、设备名、使用者、部门...">
+                    <input type="text" class="form-control" name="keyword" value="{{ keyword }}" placeholder="搜索 MAC、IP、设备名、使用者、部门、厂商...">
                 </div>
             </div>
             <div class="col-md-3">
@@ -54,13 +54,14 @@
             <table class="table table-hover table-striped mb-0">
                 <thead class="table-light">
                     <tr>
-                        <th>IP 地址</th>
+                        <th>MAC 地址</th>
+                        <th>厂商</th>
+                        <th>当前 IP</th>
+                        <th>IP 历史</th>
                         <th>操作系统</th>
                         <th>端口</th>
-                        <th>MAC 地址</th>
                         <th>设备名称</th>
                         <th>使用者</th>
-                        <th>部门</th>
                         <th>状态</th>
                         <th>最后发现</th>
                         <th>操作</th>
@@ -71,7 +72,25 @@
                     {% for device in devices %}
                     <tr>
                         <td>
-                            <code>{{ device.ip_address }}</code>
+                            <code>{{ device.mac_address }}</code>
+                        </td>
+                        <td>
+                            <small>{{ device.vendor or '-' }}</small>
+                        </td>
+                        <td>
+                            <code>{{ device.current_ip or '-' }}</code>
+                        </td>
+                        <td>
+                            {% if device.ip_history %}
+                                {% for ip in device.ip_history[:3] %}
+                                <span class="badge bg-secondary me-1" title="首次: {{ ip.first_seen|datetime }}, 最后: {{ ip.last_seen|datetime }}">{{ ip.ip_address }}</span>
+                                {% endfor %}
+                                {% if device.ip_history|length > 3 %}
+                                <span class="badge bg-light text-dark">+{{ device.ip_history|length - 3 }}</span>
+                                {% endif %}
+                            {% else %}
+                                <small class="text-muted">-</small>
+                            {% endif %}
                         </td>
                         <td>
                             {% if device.os_info and device.os_info != 'Unknown' %}
@@ -95,21 +114,21 @@
                                     {% set port_info = p.strip().replace(')', '').split('(') %}
                                     {% set port_num = port_info[0] %}
                                     {% set port_svc = port_info[1] if port_info|length > 1 else '' %}
-                                    <a href="http://{{ device.ip_address }}:{{ port_num }}" target="_blank"
-                                       class="badge bg-info text-decoration-none me-1" title="访问 {{ device.ip_address }}:{{ port_num }}">
+                                    {% if device.current_ip %}
+                                    <a href="http://{{ device.current_ip }}:{{ port_num }}" target="_blank"
+                                       class="badge bg-info text-decoration-none me-1" title="访问 {{ device.current_ip }}:{{ port_num }}">
                                         {{ port_num }}{% if port_svc %}({{ port_svc }}){% endif %}
                                     </a>
+                                    {% else %}
+                                    <span class="badge bg-info me-1">{{ port_num }}{% if port_svc %}({{ port_svc }}){% endif %}</span>
+                                    {% endif %}
                                 {% endfor %}
                             {% else %}
                                 <small class="text-muted">-</small>
                             {% endif %}
                         </td>
-                        <td>
-                            <small class="text-muted">{{ device.mac_address or '-' }}</small>
-                        </td>
                         <td>{{ device.device_name or '-' }}</td>
                         <td>{{ device.user_name or '-' }}</td>
-                        <td>{{ device.department or '-' }}</td>
                         <td>
                             {% if device.status == '已登记' %}
                             <span class="badge bg-success badge-status">已登记</span>
@@ -143,7 +162,7 @@
                     {% endfor %}
                     {% else %}
                     <tr>
-                        <td colspan="8" class="text-center text-muted py-4">
+                        <td colspan="11" class="text-center text-muted py-4">
                             {% if keyword or status %}
                             没有找到匹配的设备
                             {% else %}
@@ -157,7 +176,6 @@
         </div>
     </div>
 
-    <!-- 分页 -->
     {% if total_pages > 1 %}
     <div class="card-footer">
         <nav>
