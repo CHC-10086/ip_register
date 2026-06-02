@@ -1,7 +1,7 @@
 {
   "ports": [
+    80,
     5244,
-    8088,
     9090
   ],
   "use_custom_only": true
