@@ -1,0 +1,292 @@
+{% extends "base.html" %}
+
+{% block title %}仪表盘 - IP 登记系统{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-speedometer2"></i> 仪表盘</h2>
+    <div>
+        <a href="{{ url_for('views.scan_page') }}" class="btn btn-primary">
+            <i class="bi bi-radar"></i> 立即扫描
+        </a>
+    </div>
+</div>
+
+<!-- 统计卡片 -->
+<div class="row mb-4">
+    <div class="col-md-2">
+        <div class="card stat-card bg-primary text-white">
+            <div class="card-body text-center">
+                <h3>{{ stats.total }}</h3>
+                <small>设备总数</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card stat-card bg-success text-white">
+            <div class="card-body text-center">
+                <h3>{{ stats.registered }}</h3>
+                <small>已登记</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card stat-card bg-warning text-dark">
+            <div class="card-body text-center">
+                <h3>{{ stats.unregistered }}</h3>
+                <small>未登记</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card stat-card bg-secondary text-white">
+            <div class="card-body text-center">
+                <h3>{{ stats.offline }}</h3>
+                <small>已下线</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card stat-card bg-danger text-white">
+            <div class="card-body text-center">
+                <h3>{{ stats.conflict }}</h3>
+                <small>冲突</small>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card stat-card bg-info text-white">
+            <div class="card-body text-center">
+                <h3>{{ stats.recent_online }}</h3>
+                <small>24h 在线</small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 设备列表和快速访问 -->
+<div class="row">
+    <div class="col-md-8">
+        <div class="card mb-4">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-hdd-stack"></i> 已登记设备</span>
+                <a href="{{ url_for('views.device_list') }}" class="btn btn-sm btn-outline-primary">查看全部</a>
+            </div>
+            <div class="card-body p-0">
+                {% if registered_devices %}
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>IP 地址</th>
+                                <th>设备名称</th>
+                                <th>使用者</th>
+                                <th>快速访问</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for device in registered_devices %}
+                            <tr>
+                                <td>
+                                    <code>{{ device.ip_address }}</code>
+                                </td>
+                                <td>{{ device.device_name or '-' }}</td>
+                                <td>{{ device.user_name or '-' }}</td>
+                                <td>
+                                    {% if device.port %}
+                                        {% for p in device.port.split(',') %}
+                                            {% set port_info = p.strip().replace(')', '').split('(') %}
+                                            {% set port_num = port_info[0] %}
+                                            {% set port_svc = port_info[1] if port_info|length > 1 else '' %}
+                                            <a href="http://{{ device.ip_address }}:{{ port_num }}" target="_blank"
+                                               class="btn btn-sm btn-outline-primary me-1 mb-1" title="访问 {{ device.ip_address }}:{{ port_num }}">
+                                                <i class="bi bi-box-arrow-up-right"></i>
+                                                :{{ port_num }}
+                                                {% if port_svc %}<small>({{ port_svc }})</small>{% endif %}
+                                            </a>
+                                        {% endfor %}
+                                    {% else %}
+                                        <span class="text-muted">-</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="text-center py-4 text-muted">
+                    <i class="bi bi-hdd-stack display-4"></i>
+                    <p class="mt-2">暂无已登记设备</p>
+                    <a href="{{ url_for('views.scan_page') }}" class="btn btn-primary btn-sm">
+                        <i class="bi bi-radar"></i> 去扫描
+                    </a>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-4">
+        <!-- 自启控制 -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <i class="bi bi-power"></i> 服务控制
+            </div>
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <span>开机自启</span>
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="autoStartSwitch"
+                               {% if auto_start_enabled %}checked{% endif %}
+                               onchange="toggleAutoStart(this.checked)">
+                        <label class="form-check-label" for="autoStartSwitch">
+                            {% if auto_start_enabled %}
+                            <span class="text-success">已开启</span>
+                            {% else %}
+                            <span class="text-muted">已关闭</span>
+                            {% endif %}
+                        </label>
+                    </div>
+                </div>
+                <div class="d-flex justify-content-between align-items-center">
+                    <span>当前状态</span>
+                    <span class="badge bg-success">运行中</span>
+                </div>
+                <hr>
+                <div class="d-grid">
+                    <a href="{{ url_for('views.scan_page') }}" class="btn btn-outline-primary btn-sm">
+                        <i class="bi bi-radar"></i> 网络扫描
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <!-- 冲突信息 -->
+        <div class="card mb-4">
+            <div class="card-header bg-danger text-white">
+                <i class="bi bi-exclamation-triangle"></i> 冲突检测
+            </div>
+            <div class="card-body">
+                {% if conflicts.total > 0 %}
+                <div class="alert alert-danger mb-2">
+                    <strong>发现 {{ conflicts.total }} 个冲突!</strong>
+                    <ul class="mb-0 mt-1">
+                        {% if conflicts.ip_conflicts > 0 %}
+                        <li>IP 冲突: {{ conflicts.ip_conflicts }}</li>
+                        {% endif %}
+                        {% if conflicts.mac_conflicts > 0 %}
+                        <li>MAC 冲突: {{ conflicts.mac_conflicts }}</li>
+                        {% endif %}
+                    </ul>
+                </div>
+                <a href="{{ url_for('views.device_list', status='冲突') }}" class="btn btn-outline-danger btn-sm w-100">
+                    查看冲突设备
+                </a>
+                {% else %}
+                <div class="text-center text-success py-2">
+                    <i class="bi bi-check-circle display-6"></i>
+                    <p class="mt-2 mb-0">暂无冲突</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- 最近告警 -->
+        <div class="card mb-4">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-bell"></i> 最近告警</span>
+                {% if unread_count > 0 %}
+                <span class="badge bg-danger">{{ unread_count }} 未读</span>
+                {% endif %}
+            </div>
+            <div class="card-body">
+                {% if recent_alerts %}
+                <div class="list-group list-group-flush">
+                    {% for alert in recent_alerts %}
+                    <div class="list-group-item py-2 {% if alert.is_read %}text-muted{% endif %}">
+                        <small>{{ alert.message[:60] }}{% if alert.message|length > 60 %}...{% endif %}</small>
+                        <br><small class="text-muted">{{ alert.created_at|datetime }}</small>
+                    </div>
+                    {% endfor %}
+                </div>
+                <a href="{{ url_for('views.alert_list') }}" class="btn btn-outline-primary btn-sm w-100 mt-2">
+                    查看全部告警
+                </a>
+                {% else %}
+                <p class="text-muted text-center mb-0">暂无告警</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 最近扫描记录 -->
+<div class="card">
+    <div class="card-header">
+        <i class="bi bi-clock-history"></i> 最近扫描记录
+    </div>
+    <div class="card-body">
+        {% if scan_logs %}
+        <div class="table-responsive">
+            <table class="table table-sm table-hover">
+                <thead>
+                    <tr>
+                        <th>扫描时间</th>
+                        <th>发现设备</th>
+                        <th>新增设备</th>
+                        <th>冲突数</th>
+                        <th>耗时(秒)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for log in scan_logs %}
+                    <tr>
+                        <td>{{ log.scan_time|datetime }}</td>
+                        <td>{{ log.total_found }}</td>
+                        <td>
+                            {% if log.new_devices > 0 %}
+                            <span class="badge bg-success">{{ log.new_devices }}</span>
+                            {% else %}
+                            <span class="badge bg-secondary">0</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if log.conflict_count > 0 %}
+                            <span class="badge bg-danger">{{ log.conflict_count }}</span>
+                            {% else %}
+                            <span class="badge bg-success">0</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ log.duration_seconds }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-muted mb-0">暂无扫描记录</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function toggleAutoStart(enabled) {
+    fetch("{{ url_for('api.toggle_auto_start') }}", {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({enabled: enabled})
+    })
+    .then(resp => resp.json())
+    .then(data => {
+        if (data.success) {
+            location.reload();
+        } else {
+            alert(data.error || '操作失败');
+        }
+    });
+}
+</script>
+{% endblock %}
