@@ -5,6 +5,7 @@ import socket
 import threading
 import subprocess
 import platform
+import re
 import ipaddress
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -18,13 +19,10 @@ except ImportError:
 from models.database import get_db
 from models.device import DeviceRepository
 from services.mac_vendor import MacVendorLookup
-from services.conflict import ConflictDetector
 from services.notification import NotificationService
 
-# Windows subprocess flag
 CREATE_NO_WINDOW = 0x08000000 if platform.system().lower() == 'windows' else 0
 
-# 端口服务名
 PORT_NAMES = {
     21: 'FTP', 22: 'SSH', 23: 'Telnet', 25: 'SMTP', 53: 'DNS',
     80: 'HTTP', 110: 'POP3', 135: 'RPC', 139: 'NetBIOS', 143: 'IMAP',
@@ -37,8 +35,6 @@ PORT_NAMES = {
 
 
 class PortScanner:
-    """端口扫描器"""
-
     CONFIG_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'config_ports.json')
 
     def __init__(self):
@@ -47,33 +43,29 @@ class PortScanner:
         self.load_config()
 
     def load_config(self):
-        """加载配置"""
         try:
             if os.path.exists(self.CONFIG_FILE):
                 with open(self.CONFIG_FILE, 'r') as f:
                     config = json.load(f)
                 self.ports = config.get('ports', [])
                 self.use_custom_only = config.get('use_custom_only', True)
-        except Exception:
+        except:
             pass
-
         if not self.ports:
             self.ports = [22, 80, 443, 3389, 3306, 5432, 6379, 8080, 8443, 8888, 27017]
             self.save_config()
 
     def save_config(self):
-        """保存配置"""
         try:
             with open(self.CONFIG_FILE, 'w') as f:
                 json.dump({'ports': self.ports, 'use_custom_only': self.use_custom_only}, f, indent=2)
-        except Exception:
+        except:
             pass
 
     def scan_port(self, ip, port):
-        """扫描单个端口"""
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(1)  # 1秒超时，更准确
+            sock.settimeout(0.3)  # 0.3秒超时
             result = sock.connect_ex((ip, port))
             sock.close()
             return port if result == 0 else None
@@ -81,12 +73,10 @@ class PortScanner:
             return None
 
     def scan(self, ip):
-        """扫描指定 IP 的所有端口"""
         if not self.ports:
             return []
-
         open_ports = []
-        with ThreadPoolExecutor(max_workers=50) as executor:
+        with ThreadPoolExecutor(max_workers=100) as executor:
             futures = {executor.submit(self.scan_port, ip, p): p for p in self.ports}
             for future in as_completed(futures):
                 result = future.result()
@@ -95,7 +85,6 @@ class PortScanner:
         return sorted(open_ports)
 
     def add_port(self, port):
-        """添加端口"""
         try:
             port = int(port)
             if 1 <= port <= 65535 and port not in self.ports:
@@ -108,7 +97,6 @@ class PortScanner:
         return False
 
     def remove_port(self, port):
-        """删除端口"""
         try:
             port = int(port)
             if port in self.ports:
@@ -124,34 +112,15 @@ class PortScanner:
 
 
 def detect_os(ip):
-    """检测操作系统（简化版，更可靠）"""
-    # 1. 尝试 NetBIOS（最可靠的 Windows 检测）
-    if platform.system().lower() == 'windows':
-        try:
-            result = subprocess.run(
-                ['nbtstat', '-A', ip],
-                capture_output=True, text=True, timeout=3,
-                creationflags=CREATE_NO_WINDOW
-            )
-            if 'Registered' in result.stdout:
-                for line in result.stdout.split('\n'):
-                    if 'UNIQUE' in line:
-                        parts = line.split()
-                        if len(parts) >= 2 and parts[0] not in ('<00>', '<01>', '<03>'):
-                            return f'Windows ({parts[0]})'
-                return 'Windows'
-        except:
-            pass
-
-    # 2. 尝试 TTL 检测
+    """快速检测操作系统"""
+    # TTL 检测（最快）
     try:
         param = '-n' if platform.system().lower() == 'windows' else '-c'
         result = subprocess.run(
-            ['ping', param, '1', '-w', '1000' if platform.system().lower() == 'windows' else '-W', '1', ip],
-            capture_output=True, text=True, timeout=3,
+            ['ping', param, '1', '-w', '500' if platform.system().lower() == 'windows' else '-W', '0.5', ip],
+            capture_output=True, text=True, timeout=2,
             creationflags=CREATE_NO_WINDOW
         )
-        import re
         match = re.search(r'TTL=(\d+)', result.stdout, re.IGNORECASE)
         if match:
             ttl = int(match.group(1))
@@ -161,13 +130,10 @@ def detect_os(ip):
                 return 'Windows'
     except:
         pass
-
     return 'Unknown'
 
 
 class ARPScanner:
-    """扫描服务"""
-
     def __init__(self, app=None):
         self.app = app
         self.is_scanning = False
@@ -176,37 +142,35 @@ class ARPScanner:
         self.port_scanner = PortScanner()
         self._lock = threading.Lock()
         self.scan_mode = 'unknown'
-
         if SCAPY_AVAILABLE:
             conf.verb = 0
 
     def _arp_scan(self, subnet, timeout):
-        """ARP 扫描"""
         arp = ARP(pdst=subnet)
         ether = Ether(dst="ff:ff:ff:ff:ff:ff")
         answered, _ = srp(ether / arp, timeout=timeout, verbose=False)
         return [{'ip': r.psrc, 'mac': r.hwsrc, 'vendor': self.mac_vendor.lookup(r.hwsrc)} for s, r in answered]
 
     def _ping_scan(self, subnet, timeout):
-        """Ping 扫描"""
         network = ipaddress.ip_network(subnet, strict=False)
-        ips = [str(ip) for ip in network.hosts()][:256]  # 限制 256 个
+        ips = [str(ip) for ip in network.hosts()][:256]
 
         alive = []
-        with ThreadPoolExecutor(max_workers=30) as executor:
-            futures = {}
-            for ip in ips:
-                param = '-n' if platform.system().lower() == 'windows' else '-c'
-                cmd = ['ping', param, '1', '-w', '500' if platform.system().lower() == 'windows' else '-W', '0.5', ip]
-                futures[executor.submit(subprocess.run, cmd, capture_output=True, timeout=2, creationflags=CREATE_NO_WINDOW)] = ip
+        param = '-n' if platform.system().lower() == 'windows' else '-c'
+        w_param = '-w' if platform.system().lower() == 'windows' else '-W'
+        w_val = '300' if platform.system().lower() == 'windows' else '0.3'
 
-            for future in as_completed(futures):
-                ip = futures[future]
+        with ThreadPoolExecutor(max_workers=50) as executor:
+            def ping(ip):
                 try:
-                    if future.result().returncode == 0:
-                        alive.append(ip)
+                    r = subprocess.run(['ping', param, '1', w_param, w_val, ip],
+                                      capture_output=True, timeout=1.5, creationflags=CREATE_NO_WINDOW)
+                    return ip if r.returncode == 0 else None
                 except:
-                    pass
+                    return None
+
+            results = executor.map(ping, ips)
+            alive = [ip for ip in results if ip]
 
         devices = []
         for ip in alive:
@@ -215,9 +179,8 @@ class ARPScanner:
         return devices
 
     def _get_mac(self, ip):
-        """从 ARP 表获取 MAC"""
         try:
-            result = subprocess.run(['arp', '-a', ip], capture_output=True, text=True, timeout=3, creationflags=CREATE_NO_WINDOW)
+            result = subprocess.run(['arp', '-a', ip], capture_output=True, text=True, timeout=2, creationflags=CREATE_NO_WINDOW)
             for line in result.stdout.split('\n'):
                 if ip in line:
                     for part in line.split():
@@ -230,7 +193,6 @@ class ARPScanner:
         return None
 
     def scan(self, subnet=None, scan_ports=True):
-        """执行扫描"""
         if not SCAPY_AVAILABLE:
             return {'success': False, 'error': 'scapy 未安装'}
 
@@ -244,7 +206,6 @@ class ARPScanner:
             timeout = self.app.config['SCAN_TIMEOUT'] if self.app else 2
             start = time.time()
 
-            # 尝试 ARP，失败则 Ping
             try:
                 devices = self._arp_scan(subnet, timeout)
                 self.scan_mode = 'arp'
@@ -255,19 +216,20 @@ class ARPScanner:
                 else:
                     raise
 
-            # 扫描端口和操作系统
+            # 并发扫描端口和OS
             if scan_ports and devices:
-                for device in devices:
+                def scan_device(device):
                     ip = device['ip']
-                    open_ports = self.port_scanner.scan(ip)
-                    device['open_ports'] = open_ports
-                    device['ports_str'] = ','.join(str(p) for p in open_ports)
-                    device['port_details'] = [{'port': p, 'service': PORT_NAMES.get(p, '')} for p in open_ports]
+                    device['open_ports'] = self.port_scanner.scan(ip)
+                    device['ports_str'] = ','.join(str(p) for p in device['open_ports'])
+                    device['port_details'] = [{'port': p, 'service': PORT_NAMES.get(p, '')} for p in device['open_ports']]
                     device['os_info'] = detect_os(ip)
+
+                with ThreadPoolExecutor(max_workers=10) as executor:
+                    list(executor.map(scan_device, devices))
 
             duration = time.time() - start
 
-            # 保存结果
             new_devices = 0
             if self.app:
                 with self.app.app_context():
@@ -303,28 +265,23 @@ class ARPScanner:
         return {'success': True, 'message': '扫描已启动'}
 
     def _save_results(self, devices):
-        """保存扫描结果到数据库"""
         new_count = 0
         alert_service = NotificationService(self.app)
-
         for device in devices:
             mac = device.get('mac', '')
             if not mac:
                 continue
-
             ip = device['ip']
             ports_str = device.get('ports_str', '')
             os_info = device.get('os_info', '')
             vendor = device.get('vendor', '')
 
             existing = DeviceRepository.get_by_mac(mac)
-
             if existing:
                 updates = {'current_ip': ip}
                 if ports_str:
                     old = set(existing.port.split(',')) if existing.port else set()
-                    new = set(ports_str.split(','))
-                    updates['port'] = ','.join(sorted(old | new))
+                    updates['port'] = ','.join(sorted(old | set(ports_str.split(','))))
                 if os_info and os_info != 'Unknown' and (not existing.os_info or existing.os_info == 'Unknown'):
                     updates['os_info'] = os_info
                 if vendor and not existing.vendor:
@@ -345,7 +302,6 @@ class ARPScanner:
                     DeviceRepository.update(device_id, **update)
                 new_count += 1
                 alert_service.notify_new_device(ip, mac, vendor)
-
         return new_count
 
     def _log_scan(self, total, new_devices, duration):
