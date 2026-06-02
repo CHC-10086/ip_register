@@ -301,3 +301,44 @@ def toggle_auto_start():
         return jsonify({'success': True, 'enabled': enabled})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
+
+
+@api_bp.route('/ports', methods=['GET'])
+def get_ports():
+    """获取端口配置"""
+    return jsonify({
+        'success': True,
+        'data': scanner.port_scanner.get_config()
+    })
+
+
+@api_bp.route('/ports', methods=['POST'])
+def update_ports():
+    """更新端口配置"""
+    data = request.get_json() or {}
+    action = data.get('action')
+
+    if action == 'add':
+        port = data.get('port')
+        if scanner.port_scanner.add_port(port):
+            return jsonify({'success': True, 'message': f'Port {port} added'})
+        return jsonify({'success': False, 'error': 'Invalid port'}), 400
+
+    elif action == 'remove':
+        port = data.get('port')
+        if scanner.port_scanner.remove_port(port):
+            return jsonify({'success': True, 'message': f'Port {port} removed'})
+        return jsonify({'success': False, 'error': 'Invalid port'}), 400
+
+    elif action == 'set_custom_only':
+        enabled = data.get('enabled', False)
+        scanner.port_scanner.set_custom_only(enabled)
+        return jsonify({'success': True, 'custom_only': enabled})
+
+    elif action == 'set_ports':
+        ports = data.get('ports', [])
+        scanner.port_scanner.ports = sorted(set(int(p) for p in ports if 1 <= int(p) <= 65535))
+        scanner.port_scanner._write_config()
+        return jsonify({'success': True, 'ports': scanner.port_scanner.ports})
+
+    return jsonify({'success': False, 'error': 'Invalid action'}), 400

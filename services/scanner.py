@@ -175,20 +175,97 @@ def get_port_categories():
 class PortScanner:
     """端口扫描器"""
 
+    CONFIG_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'config_ports.json')
+
     def __init__(self, timeout=0.5, max_workers=100, custom_ports=None):
         self.timeout = timeout
         self.max_workers = max_workers
-        # 合并默认端口和自定义端口
-        self.ports = list(set(COMMON_PORTS))
+        self.use_custom_only = False
+        self.ports = self._load_ports(custom_ports)
+
+    def _load_ports(self, custom_ports=None):
+        """从配置文件加载端口"""
+        config = self._read_config()
+        self.use_custom_only = config.get('use_custom_only', False)
+        saved_ports = config.get('ports', [])
+
+        if self.use_custom_only and saved_ports:
+            # 仅使用自定义端口
+            return sorted(set(saved_ports))
+
+        # 使用默认端口 + 自定义端口
+        all_ports = list(set(COMMON_PORTS))
+        if saved_ports:
+            all_ports.extend(saved_ports)
         if custom_ports:
             for p in custom_ports:
                 try:
                     port = int(p)
-                    if 1 <= port <= 65535 and port not in self.ports:
-                        self.ports.append(port)
+                    if 1 <= port <= 65535:
+                        all_ports.append(port)
                 except (ValueError, TypeError):
                     pass
-        self.ports.sort()
+        return sorted(set(all_ports))
+
+    def _read_config(self):
+        """读取配置文件"""
+        try:
+            if os.path.exists(self.CONFIG_FILE):
+                import json
+                with open(self.CONFIG_FILE, 'r') as f:
+                    return json.load(f)
+        except Exception:
+            pass
+        return {'ports': [], 'use_custom_only': False}
+
+    def _write_config(self):
+        """写入配置文件"""
+        try:
+            import json
+            config = self._read_config()
+            config['ports'] = sorted(self.ports)
+            config['use_custom_only'] = self.use_custom_only
+            with open(self.CONFIG_FILE, 'w') as f:
+                json.dump(config, f, indent=2)
+        except Exception:
+            pass
+
+    def add_port(self, port):
+        """添加端口"""
+        try:
+            port = int(port)
+            if 1 <= port <= 65535 and port not in self.ports:
+                self.ports.append(port)
+                self.ports.sort()
+                self._write_config()
+                return True
+        except (ValueError, TypeError):
+            pass
+        return False
+
+    def remove_port(self, port):
+        """删除端口"""
+        try:
+            port = int(port)
+            if port in self.ports:
+                self.ports.remove(port)
+                self._write_config()
+                return True
+        except (ValueError, TypeError):
+            pass
+        return False
+
+    def set_custom_only(self, enabled):
+        """设置是否仅扫描自定义端口"""
+        self.use_custom_only = enabled
+        self._write_config()
+
+    def get_config(self):
+        """获取当前配置"""
+        return {
+            'ports': self.ports,
+            'use_custom_only': self.use_custom_only,
+        }
 
     def scan_port(self, ip, port):
         """检测单个端口是否开放"""

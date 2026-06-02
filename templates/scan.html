@@ -71,6 +71,35 @@
     </div>
 </div>
 
+<!-- 端口管理 -->
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-hdd-network"></i> 扫描端口管理</span>
+        <div class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" id="customOnlySwitch" onchange="toggleCustomOnly(this.checked)">
+            <label class="form-check-label" for="customOnlySwitch">仅扫描自定义端口</label>
+        </div>
+    </div>
+    <div class="card-body">
+        <div class="row mb-3">
+            <div class="col-md-8">
+                <div class="input-group">
+                    <input type="number" class="form-control" id="newPort" placeholder="输入端口号 (1-65535)" min="1" max="65535">
+                    <button class="btn btn-success" onclick="addPort()">
+                        <i class="bi bi-plus"></i> 添加
+                    </button>
+                </div>
+            </div>
+            <div class="col-md-4 text-end">
+                <span class="badge bg-primary" id="portCount">0 个端口</span>
+            </div>
+        </div>
+        <div id="portList" class="d-flex flex-wrap gap-2">
+            <!-- 端口会在这里动态显示 -->
+        </div>
+    </div>
+</div>
+
 <!-- 上次扫描结果 -->
 {% if last_result and last_result.success %}
 <div class="card mb-4">
@@ -231,38 +260,6 @@
     </div>
 </div>
 
-<!-- 端口列表 -->
-<div class="card mb-4" id="port-list">
-    <div class="card-header">
-        <i class="bi bi-hdd-network"></i> 扫描端口列表（共 {{ port_count }} 个）
-    </div>
-    <div class="card-body">
-        <div class="accordion" id="portAccordion">
-            {% for cat in port_categories %}
-            <div class="accordion-item">
-                <h2 class="accordion-header">
-                    <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#cat{{ loop.index }}">
-                        <span class="badge bg-primary me-2">{{ cat.count }}</span>
-                        {{ cat.name }}
-                    </button>
-                </h2>
-                <div id="cat{{ loop.index }}" class="accordion-collapse collapse" data-bs-parent="#portAccordion">
-                    <div class="accordion-body">
-                        <div class="d-flex flex-wrap gap-2">
-                            {% for p in cat.ports %}
-                            <span class="badge bg-secondary" title="{{ p.service }}">
-                                {{ p.port }} <small class="text-light">({{ p.service }})</small>
-                            </span>
-                            {% endfor %}
-                        </div>
-                    </div>
-                </div>
-            </div>
-            {% endfor %}
-        </div>
-    </div>
-</div>
-
 <!-- Npcap 安装说明 -->
 <div class="card mb-4" id="install-npcap">
     <div class="card-header bg-warning text-dark">
@@ -357,6 +354,106 @@
 
 {% block extra_js %}
 <script>
+var portNames = {
+    20: 'FTP-Data', 21: 'FTP', 22: 'SSH', 23: 'Telnet', 25: 'SMTP',
+    53: 'DNS', 80: 'HTTP', 110: 'POP3', 135: 'RPC', 139: 'NetBIOS',
+    143: 'IMAP', 443: 'HTTPS', 445: 'SMB', 993: 'IMAPS', 995: 'POP3S',
+    1433: 'MSSQL', 1521: 'Oracle', 3306: 'MySQL', 3389: 'RDP',
+    5432: 'PostgreSQL', 5900: 'VNC', 6379: 'Redis', 8080: 'HTTP-Alt',
+    8443: 'HTTPS-Alt', 8888: 'HTTP-Alt', 9090: 'Console',
+    11211: 'Memcached', 27017: 'MongoDB'
+};
+
+// 加载端口配置
+function loadPorts() {
+    fetch("{{ url_for('api.get_ports') }}")
+    .then(resp => resp.json())
+    .then(data => {
+        if (data.success) {
+            var ports = data.data.ports;
+            var customOnly = data.data.use_custom_only;
+            document.getElementById('customOnlySwitch').checked = customOnly;
+            renderPorts(ports);
+        }
+    });
+}
+
+// 渲染端口列表
+function renderPorts(ports) {
+    var html = '';
+    ports.forEach(function(p) {
+        var name = portNames[p] || '';
+        html += '<span class="badge bg-primary port-badge" style="font-size: 0.9em;">' +
+            p + (name ? ' <small>(' + name + ')</small>' : '') +
+            ' <a href="#" onclick="removePort(' + p + '); return false;" class="text-white ms-1" title="删除">&times;</a>' +
+            '</span>';
+    });
+    document.getElementById('portList').innerHTML = html || '<span class="text-muted">暂无端口</span>';
+    document.getElementById('portCount').textContent = ports.length + ' 个端口';
+}
+
+// 添加端口
+function addPort() {
+    var input = document.getElementById('newPort');
+    var port = parseInt(input.value);
+    if (!port || port < 1 || port > 65535) {
+        alert('请输入有效端口号 (1-65535)');
+        return;
+    }
+    fetch("{{ url_for('api.update_ports') }}", {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({action: 'add', port: port})
+    })
+    .then(resp => resp.json())
+    .then(data => {
+        if (data.success) {
+            input.value = '';
+            loadPorts();
+        } else {
+            alert(data.error || '添加失败');
+        }
+    });
+}
+
+// 删除端口
+function removePort(port) {
+    fetch("{{ url_for('api.update_ports') }}", {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({action: 'remove', port: port})
+    })
+    .then(resp => resp.json())
+    .then(data => {
+        if (data.success) {
+            loadPorts();
+        }
+    });
+}
+
+// 切换仅自定义端口
+function toggleCustomOnly(enabled) {
+    fetch("{{ url_for('api.update_ports') }}", {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({action: 'set_custom_only', enabled: enabled})
+    })
+    .then(resp => resp.json())
+    .then(data => {
+        if (data.success) {
+            loadPorts();
+        }
+    });
+}
+
+// 回车添加端口
+document.getElementById('newPort').addEventListener('keypress', function(e) {
+    if (e.key === 'Enter') addPort();
+});
+
+// 页面加载时获取端口
+loadPorts();
+
 function togglePortInput() {
     const div = document.getElementById('customPortsDiv');
     const cb = document.getElementById('toggleCustomPorts');
@@ -370,21 +467,14 @@ function startAsyncScan() {
 
     fetch("{{ url_for('views.scan_async') }}", {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-        },
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
         body: 'subnet=' + encodeURIComponent(subnet) + '&scan_ports=' + scanPorts + '&custom_ports=' + encodeURIComponent(customPorts)
     })
-    .then(response => {
-        window.location.reload();
-    });
+    .then(response => { window.location.reload(); });
 }
 
-// 自动刷新扫描状态
 {% if is_scanning %}
-setTimeout(function() {
-    window.location.reload();
-}, 3000);
+setTimeout(function() { window.location.reload(); }, 3000);
 {% endif %}
 </script>
 {% endblock %}
