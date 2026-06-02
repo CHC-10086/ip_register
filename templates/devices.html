@@ -115,8 +115,8 @@
                                     {% set port_num = port_info[0] %}
                                     {% set port_svc = port_info[1] if port_info|length > 1 else '' %}
                                     {% if device.current_ip %}
-                                    <a href="http://{{ device.current_ip }}:{{ port_num }}" target="_blank"
-                                       class="badge bg-info text-decoration-none me-1" title="访问 {{ device.current_ip }}:{{ port_num }}">
+                                    <a href="javascript:void(0)" onclick="window.open('http://{{ device.current_ip }}:{{ port_num }}')"
+                                       class="badge bg-info text-decoration-none me-1" style="cursor:pointer" title="访问 {{ device.current_ip }}:{{ port_num }}">
                                         {{ port_num }}{% if port_svc %}({{ port_svc }}){% endif %}
                                     </a>
                                     {% else %}

@@ -129,12 +129,14 @@
                                             {% set port_info = p.strip().replace(')', '').split('(') %}
                                             {% set port_num = port_info[0] %}
                                             {% set port_svc = port_info[1] if port_info|length > 1 else '' %}
-                                            <a href="http://{{ device.ip_address }}:{{ port_num }}" target="_blank"
-                                               class="btn btn-sm btn-outline-primary me-1 mb-1" title="访问 {{ device.ip_address }}:{{ port_num }}">
+                                            {% if device.current_ip %}
+                                            <a href="javascript:void(0)" onclick="window.open('http://{{ device.current_ip }}:{{ port_num }}')"
+                                               class="btn btn-sm btn-outline-primary me-1 mb-1" style="cursor:pointer" title="访问 {{ device.current_ip }}:{{ port_num }}">
                                                 <i class="bi bi-box-arrow-up-right"></i>
                                                 :{{ port_num }}
                                                 {% if port_svc %}<small>({{ port_svc }})</small>{% endif %}
                                             </a>
+                                            {% endif %}
                                         {% endfor %}
                                     {% else %}
                                         <span class="text-muted">-</span>
